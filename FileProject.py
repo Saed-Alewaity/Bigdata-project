@@ -6,15 +6,15 @@ USE_DRIVE = True  #When You want to read file from drive make True
 if USE_DRIVE:
     from google.colab import drive
     drive.mount("/content/drive")
-    INPUT_PATH = "/content/drive/BigDataTwitter/data2.csv"   # عدّل المسار حسب مكان الملف
-    OUTPUT_DIR = "/content/drive/BigDataTwitter/data2_outputs"
+    INPUT_PATH = "/content/drive/BigDataTwitter/data2.csv"   #Your path for dataset in drive
+    OUTPUT_DIR = "/content/drive/BigDataTwitter/data2_outputs" #Your path output in drive
 else:
-    INPUT_PATH = "/content/Sentiment140.csv"
-    OUTPUT_DIR = "/content/outputs"
+    INPUT_PATH = "/content/data2.csv" #Your path for dataset in local
+    OUTPUT_DIR = "/content/data2_outputs"#Your path output in local
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # =========================
-# 2) إنشاء SparkSession
+# Create SparkSession
 # =========================
 from pyspark.sql import SparkSession, functions as F, types as T
 from pyspark.ml import Pipeline
@@ -34,31 +34,31 @@ spark.sparkContext.setLogLevel("WARN")
 print("[INFO] Spark version:", spark.version)
 
 # =========================
-# 3) تحميل Sentiment140
-#    الأعمدة الأصلية: target,id,date,flag,user,text
-#    القيم: 0 = سلبي ، 4 = إيجابي
+# Load Dataset "Sentiment140"
+#    Column: target,id,date,flag,user,text
 # =========================
-# ملاحظات:
-# - بعض نسخ Sentiment140 تكون مفصولة بفواصل دون header.
-# - إذا الملف مضغوط (.zip/.gz) فضّه أولاً أو عدّل القراءة.
 df = (spark.read
       .option("header", False)
       .option("multiLine", True)
       .csv(INPUT_PATH)
       .toDF("target", "id", "date", "flag", "user", "text"))
 
-# تنظيف أساسي
+# PrePrcoessing data
+# Delete row in text column have NULL or empty.
 df = df.dropna(subset=["text"])
 df = df.filter(F.length(F.col("text")) > 0)
 
-# تحويل الهدف إلى 0/1
+#Exclude tweets Neutral 
+df = df.filter(F.col("target").isin("0", "4"))
+
+# Binarization target column to 0/1 (1.0 positvie , 0.0 negative)
 df = df.withColumn("label", F.when(F.col("target") == "4", 1.0).otherwise(0.0))
 
 print("[INFO] Total rows:", df.count())
 df.show(5, truncate=80)
 
 # =========================
-# 4) تجهيز النصوص (Tokenize -> Stopwords -> TF -> TFIDF)
+# Cleant text (Tokenize -> Stopwords -> TF -> TFIDF)
 # =========================
 tokenizer = RegexTokenizer(
     inputCol="text",
@@ -68,24 +68,23 @@ tokenizer = RegexTokenizer(
     toLowercase=True
 )
 
-# الإنجليزية كافتراضي لأن Sentiment140 إنجليزي غالبًا
+# Stop removal Defualt English word.
 stop_remover = StopWordsRemover(
     inputCol="tokens",
     outputCol="tokens_clean",
     stopWords=StopWordsRemover.loadDefaultStopWords("english")
 )
 
-# خصّص حجم المفردات والدعم الأدنى لتسريع Colab إن لزم
 cv = CountVectorizer(inputCol="tokens_clean", outputCol="tf", vocabSize=50000, minDF=5)
 idf = IDF(inputCol="tf", outputCol="tfidf")
 
 # =========================
-# 5) تقسيم البيانات
+# Split data to train 70%, test 30%.    
 # =========================
-train, test = df.randomSplit([0.8, 0.2], seed=42)
+train, test = df.randomSplit([0.7, 0.3], seed=42)
 
 # =========================
-# 6) Logistic Regression
+# Implement Logistic Regression Model
 # =========================
 lr = LogisticRegression(featuresCol="tfidf", labelCol="label", maxIter=50, regParam=0.0)
 pipeline_lr = Pipeline(stages=[tokenizer, stop_remover, cv, idf, lr])
@@ -99,7 +98,7 @@ lr_pred = lr_model.transform(test).cache()
 lr_pred_time = time.time() - t0
 
 # =========================
-# 7) Random Forest
+# Implement Random Forest Model
 # =========================
 rf = RandomForestClassifier(featuresCol="tfidf", labelCol="label",
                             numTrees=100, maxDepth=10, seed=42)
@@ -114,8 +113,7 @@ rf_pred = rf_model.transform(test).cache()
 rf_pred_time = time.time() - t0
 
 # =========================
-# 8) التقييم: Accuracy / Precision / Recall / F1
-#    نستخدم المقاييس الموزونة (weighted) للاحتمال وجود عدم توازن
+# Evalution metrics (Accuracy, Precision, Recall, F1)
 # =========================
 def evaluate_all(pred_df, label_col="label", pred_col="prediction"):
     eval_acc = MulticlassClassificationEvaluator(labelCol=label_col, predictionCol=pred_col, metricName="accuracy")
@@ -132,7 +130,7 @@ def evaluate_all(pred_df, label_col="label", pred_col="prediction"):
 metrics_lr = evaluate_all(lr_pred)
 metrics_rf = evaluate_all(rf_pred)
 
-# إضافة أزمنة التدريب/التنبؤ
+# Training Time and Prediction Time For models 
 metrics_lr.update({"Model": "Logistic Regression",
                    "Training Time (sec)": lr_train_time,
                    "Prediction Time (sec)": lr_pred_time})
