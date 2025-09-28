@@ -6,12 +6,12 @@ USE_DRIVE = True  #When You want to read file from drive make True
 if USE_DRIVE:
     from google.colab import drive
     drive.mount("/content/drive")
-    INPUT_PATH = "/content/drive/BigDataTwitter/data2.csv"   #Your path for dataset in drive
-    OUTPUT_DIR = "/content/drive/BigDataTwitter/data2_outputs" #Your path output in drive
+    INPUT_PATH = "/content/drive/MyDrive/BigDataTwitter/data2.csv"   #Your path for dataset in drive
+    OUTPUT_DIR = "/content/drive/MyDrive/BigDataTwitter/data2_outputs" #Your path output in drive
 else:
     INPUT_PATH = "/content/data2.csv" #Your path for dataset in local
     OUTPUT_DIR = "/content/data2_outputs"#Your path output in local
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # =========================
 # Create SparkSession
@@ -44,6 +44,9 @@ df = (spark.read
       .toDF("target", "id", "date", "flag", "user", "text"))
 
 # PrePrcoessing data
+#Drop unnecessary columns (id, date, flag)
+df = df.drop("id", "date", "flag")
+
 # Delete row in text column have NULL or empty.
 df = df.dropna(subset=["text"])
 df = df.filter(F.length(F.col("text")) > 0)
@@ -158,7 +161,7 @@ def save_top_terms_from_lr(pipeline_model, top_k=30):
     cv_model = pipeline_model.stages[2]
     lr_model = pipeline_model.stages[4]
     vocab = cv_model.vocabulary
-    coeff = lr_model.coefficients.toArray()  # نفس ترتيب vocab
+    coeff = lr_model.coefficients.toArray()
 
     pos_idx = np.argsort(coeff)[-top_k:][::-1]
     neg_idx = np.argsort(coeff)[:top_k]
@@ -188,11 +191,11 @@ save_top_terms_from_lr(lr_model, top_k=30)
 save_top_terms_from_rf(rf_model, top_k=50)
 
 # =========================
-# 10) تفسير على مستوى التغريدة (LR)
-#     مساهمة كل توكن تقريبًا = TFIDF(token) * LR_coefficient(token)
-#     نعيد أهم 10 توكنات لكل تغريدة
+# Tweet-level interpretation (LR)
+#     Contribution every token = TFIDF(token) * LR_coefficient(token)
+#     Return 10 most important tokens evert tweet
 # =========================
-# استرجاع vocab و coeff مرة أخرى من نموذج LR
+# Return vocab and coeff From LR model
 cv_model_lr = lr_model.stages[2]
 lr_stage = lr_model.stages[4]
 VOCAB = cv_model_lr.vocabulary
@@ -219,11 +222,11 @@ def explain_vector(tfidf_sparse):
             token = f"idx_{idx}"
         c = float(val) * float(COEFF[idx])
         contribs.append({"token": token, "contribution": c})
-    # رتّب حسب القيمة المطلقة للمساهمة
+    # sorted 
     contribs = sorted(contribs, key=lambda d: abs(d["contribution"]), reverse=True)[:10]
     return contribs
 
-# أعد حساب ميزات LR على test للحصول على tfidf (نفس pipeline)
+# calc features test 
 lr_features_test = lr_model.transform(test).select("text","label","prediction","tfidf")
 
 explanations = (lr_features_test
@@ -236,17 +239,140 @@ explanations = (lr_features_test
 
 explain_path = os.path.join(OUTPUT_DIR, "tweet_level_explanations.json")
 (explanations
- .limit(2000)  # لمنع ملفات ضخمة في كولاب، غيّر الرقم حسب الحاجة
+ .limit(2000) 
  .coalesce(1)
  .write.mode("overwrite")
  .json(explain_path))
 print(f"[Explain-PerTweet] Saved (sample) to: {explain_path}")
 
-# عرض عيّنة صغيرة
+# Print sample tweet
 print("\n=== Sample tweet-level explanations (LR) ===")
 for row in explanations.limit(5).collect():
     print("Text:", row["text"][:120].replace("\n"," "))
     print("Pred:", int(row["prediction"]), "| Top+:", row["top_pos_tokens"], "| Top-:", row["top_neg_tokens"])
     print("----")
 
-print("\n[DONE] كل النتائج تم حفظها في:", OUTPUT_DIR)
+print("\n[DONE] All result is saved in :", OUTPUT_DIR)
+
+# =========================
+# 11) Visualizations (Matplotlib)
+# =========================
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Read result from file
+eval_csv = os.path.join(OUTPUT_DIR, "evaluation_results.csv")
+results_plot_df = pd.read_csv(eval_csv)
+
+# Bar chart to compare Metrics
+metrics = ["Accuracy", "Precision", "Recall", "F1"]
+models  = results_plot_df["Model"].tolist()
+x = np.arange(len(metrics))
+
+fig = plt.figure(figsize=(8,4))
+width = 0.35
+for i, m in enumerate(models):
+    vals = results_plot_df.loc[results_plot_df["Model"]==m, metrics].values.flatten()
+    plt.bar(x + (i-0.5)*width, vals, width, label=m)
+plt.xticks(x, metrics)
+plt.title("Model Metrics Comparison")
+plt.legend()
+plt.tight_layout()
+metrics_png = os.path.join(OUTPUT_DIR, "metrics_comparison.png")
+plt.savefig(metrics_png, dpi=150)
+plt.show()
+print("[PLOT] Saved:", metrics_png)
+
+# Bar chart to compare Time
+time_metrics = ["Training Time (sec)", "Prediction Time (sec)"]
+x = np.arange(len(time_metrics))
+fig = plt.figure(figsize=(8,4))
+for i, m in enumerate(models):
+    vals = results_plot_df.loc[results_plot_df["Model"]==m, time_metrics].values.flatten()
+    plt.bar(x + (i-0.5)*width, vals, width, label=m)
+plt.xticks(x, time_metrics, rotation=10)
+plt.title("Time Efficiency Comparison")
+plt.legend()
+plt.tight_layout()
+time_png = os.path.join(OUTPUT_DIR, "time_efficiency.png")
+plt.savefig(time_png, dpi=150)
+plt.show()
+print("[PLOT] Saved:", time_png)
+
+# Confusion Matrix for Both Model
+def plot_confusion(pred_df, name, out_dir=OUTPUT_DIR):
+
+    pdf = pred_df.select("label","prediction").toPandas()
+
+    pdf["label"] = pdf["label"].astype(int)
+    pdf["prediction"] = pdf["prediction"].astype(int)
+    cm = pd.crosstab(pdf["label"], pdf["prediction"], rownames=["True"], colnames=["Pred"], dropna=False)
+    # Sure column and row is 0,1
+    for v in [0,1]:
+        if v not in cm.index: cm.loc[v] = 0
+        if v not in cm.columns: cm[v] = 0
+    cm = cm.sort_index().reindex(columns=[0,1])
+
+    fig = plt.figure(figsize=(4,4))
+    plt.imshow(cm.values, interpolation="nearest")
+    plt.title(f"Confusion Matrix - {name}")
+    plt.xticks([0,1],[0,1])
+    plt.yticks([0,1],[0,1])
+
+    for i in range(2):
+        for j in range(2):
+            plt.text(j, i, int(cm.values[i,j]), ha="center", va="center")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+    path = os.path.join(out_dir, f"confusion_matrix_{name.replace(' ','_')}.png")
+    plt.savefig(path, dpi=150)
+    plt.show()
+    print("[PLOT] Saved:", path)
+
+plot_confusion(lr_pred, "Logistic Regression")
+plot_confusion(rf_pred, "Random Forest")
+
+# Top 20 word in LR Model
+lr_pos_csv = os.path.join(OUTPUT_DIR, "lr_top_positive_terms.csv")
+lr_neg_csv = os.path.join(OUTPUT_DIR, "lr_top_negative_terms.csv")
+if os.path.exists(lr_pos_csv) and os.path.exists(lr_neg_csv):
+    pos_df = pd.read_csv(lr_pos_csv).head(20)  # أعلى 20
+    neg_df = pd.read_csv(lr_neg_csv).head(20)
+
+    # Top 20 positive word in LR Model
+    fig = plt.figure(figsize=(8,6))
+    plt.barh(pos_df["token"][::-1], pos_df["coefficient"][::-1])
+    plt.title("LR Top Positive Tokens (highest coefficients)")
+    plt.tight_layout()
+    path = os.path.join(OUTPUT_DIR, "lr_top_positive_barh.png")
+    plt.savefig(path, dpi=150)
+    plt.show()
+    print("[PLOT] Saved:", path)
+
+    # Top 20 negative word in LR Model
+    fig = plt.figure(figsize=(8,6))
+    plt.barh(neg_df["token"][::-1], neg_df["coefficient"][::-1])
+    plt.title("LR Top Negative Tokens (lowest coefficients)")
+    plt.tight_layout()
+    path = os.path.join(OUTPUT_DIR, "lr_top_negative_barh.png")
+    plt.savefig(path, dpi=150)
+    plt.show()
+    print("[PLOT] Saved:", path)
+else:
+    print("[WARN] LR top-terms CSV files not found. Skipping LR token plots.")
+
+# ---------- (5) أهم ميزات RF ----------
+rf_csv = os.path.join(OUTPUT_DIR, "rf_top_features.csv")
+if os.path.exists(rf_csv):
+    rf_df = pd.read_csv(rf_csv).head(30)  # أعلى 30
+    fig = plt.figure(figsize=(8,8))
+    plt.barh(rf_df["token"][::-1], rf_df["importance"][::-1])
+    plt.title("RF Top Features by Importance")
+    plt.tight_layout()
+    path = os.path.join(OUTPUT_DIR, "rf_top_features_barh.png")
+    plt.savefig(path, dpi=150)
+    plt.show()
+    print("[PLOT] Saved:", path)
+else:
+    print("[WARN] RF top-features file not found. Skipping RF plot.")
