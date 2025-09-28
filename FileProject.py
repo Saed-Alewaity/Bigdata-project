@@ -1,8 +1,8 @@
 # =========================
 # Connected with Google Drive
 # =========================
-USE_DRIVE = True  #When You want to read file from drive make True
-
+#When You want to read file from drive make True
+USE_DRIVE = True  
 if USE_DRIVE:
     from google.colab import drive
     drive.mount("/content/drive")
@@ -66,7 +66,7 @@ df.show(5, truncate=80)
 tokenizer = RegexTokenizer(
     inputCol="text",
     outputCol="tokens",
-    pattern=r"[^A-Za-zء-ي0-9_]+",  # إنجليزي + عربي + أرقام
+    pattern=r"[^A-Za-zء-ي0-9_]+",  #English, Arabic, Number.
     gaps=True,
     toLowercase=True
 )
@@ -191,7 +191,7 @@ save_top_terms_from_lr(lr_model, top_k=30)
 save_top_terms_from_rf(rf_model, top_k=50)
 
 # =========================
-# Tweet-level interpretation (LR)
+# Tweet-level interpretation (LR):
 #     Contribution every token = TFIDF(token) * LR_coefficient(token)
 #     Return 10 most important tokens evert tweet
 # =========================
@@ -255,7 +255,7 @@ for row in explanations.limit(5).collect():
 print("\n[DONE] All result is saved in :", OUTPUT_DIR)
 
 # =========================
-# 11) Visualizations (Matplotlib)
+# Visualizations (Matplotlib)
 # =========================
 import matplotlib.pyplot as plt
 import numpy as np
@@ -337,7 +337,7 @@ plot_confusion(rf_pred, "Random Forest")
 lr_pos_csv = os.path.join(OUTPUT_DIR, "lr_top_positive_terms.csv")
 lr_neg_csv = os.path.join(OUTPUT_DIR, "lr_top_negative_terms.csv")
 if os.path.exists(lr_pos_csv) and os.path.exists(lr_neg_csv):
-    pos_df = pd.read_csv(lr_pos_csv).head(20)  # أعلى 20
+    pos_df = pd.read_csv(lr_pos_csv).head(20)  
     neg_df = pd.read_csv(lr_neg_csv).head(20)
 
     # Top 20 positive word in LR Model
@@ -362,10 +362,10 @@ if os.path.exists(lr_pos_csv) and os.path.exists(lr_neg_csv):
 else:
     print("[WARN] LR top-terms CSV files not found. Skipping LR token plots.")
 
-# ---------- (5) أهم ميزات RF ----------
+# Top features by importance RF Model
 rf_csv = os.path.join(OUTPUT_DIR, "rf_top_features.csv")
 if os.path.exists(rf_csv):
-    rf_df = pd.read_csv(rf_csv).head(30)  # أعلى 30
+    rf_df = pd.read_csv(rf_csv).head(30)
     fig = plt.figure(figsize=(8,8))
     plt.barh(rf_df["token"][::-1], rf_df["importance"][::-1])
     plt.title("RF Top Features by Importance")
