@@ -1,7 +1,7 @@
 # =========================
-# 1) إعداد المسارات + اختياري: ربط Google Drive
+# Connected with Google Drive
 # =========================
-USE_DRIVE = True  # لو بدك تقرأ/تكتب على جوجل درايف خليه True
+USE_DRIVE = True  #When You want to read file from drive make True
 
 if USE_DRIVE:
     from google.colab import drive
