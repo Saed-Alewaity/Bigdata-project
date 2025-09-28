@@ -138,7 +138,7 @@ metrics_rf.update({"Model": "Random Forest",
                    "Training Time (sec)": rf_train_time,
                    "Prediction Time (sec)": rf_pred_time})
 
-# ترتيب الأعمدة وحفظ النتائج
+# Save result
 results_df = pd.DataFrame([metrics_lr, metrics_rf])[
     ["Model","Accuracy","Precision","Recall","F1","Training Time (sec)","Prediction Time (sec)"]
 ]
@@ -149,9 +149,9 @@ display(results_df)
 print(f"[INFO] Saved: {results_path}")
 
 # =========================
-# 9) Explainability (مبسّط)
-#    - LR: معاملات كل كلمة (coefficient) -> أهم الكلمات إيجابيًا/سلبيًا
-#    - RF: Feature Importances -> أهم الكلمات عالميًا
+# Explainability
+#    - Logistic Regression: Top important negative/positive word
+#    - Random Forest: Top Feature Importances
 # =========================
 def save_top_terms_from_lr(pipeline_model, top_k=30):
     # tokenizer(0) -> stop_remover(1) -> cv(2) -> idf(3) -> lr(4)
